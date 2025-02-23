@@ -2,8 +2,9 @@ package dns
 
 import (
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"math"
-	"math/rand/v2"
+	"math/rand"
 	"net"
 )
 
@@ -17,15 +18,8 @@ func NewClient(server string) *Client {
 	}
 }
 
-func (c *Client) Query(domain string) (*Packet, error) {
-	var err error
-	conn, err := net.Dial("udp", fmt.Sprintf("%s:53", c.server))
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
-	sendPacket := &Packet{
+func (c *Client) ResolveA(domain string) ([]*ResourceRecord, error) {
+	recvPacket, err := c.question(&Packet{
 		Id:                 uint16(rand.Int() % math.MaxUint16),
 		Qr:                 QRQuery,
 		IsRecursionDesired: true,
@@ -33,11 +27,49 @@ func (c *Client) Query(domain string) (*Packet, error) {
 		Questions: []*Question{
 			{
 				Qname:  domain,
-				Qtype:  1,
+				Qtype:  TypeA,
 				Qclass: 1,
 			},
 		},
+	})
+	if err != nil {
+		return nil, err
 	}
+	fmt.Printf("recvPacket: %+v", spew.Sdump(recvPacket))
+
+	return recvPacket.Answers, nil
+}
+
+func (c *Client) ResolveTXT(domain string) ([]*ResourceRecord, error) {
+	recvPacket, err := c.question(&Packet{
+		Id:                 uint16(rand.Int() % math.MaxUint16),
+		Qr:                 QRQuery,
+		IsRecursionDesired: true,
+		QuestionCount:      1,
+		Questions: []*Question{
+			{
+				Qname:  domain,
+				Qtype:  TypeTXT,
+				Qclass: 1,
+			},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("recvPacket: %+v", spew.Sdump(recvPacket))
+
+	return recvPacket.Answers, nil
+}
+
+func (c *Client) question(sendPacket *Packet) (*Packet, error) {
+	var err error
+	conn, err := net.Dial("udp", fmt.Sprintf("%s:53", c.server))
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
 	sendBuf, err := EncodePacket(sendPacket)
 	fmt.Printf("sendPacket: %+v\n", sendPacket)
 	fmt.Printf("sendBuf: %+v\n", sendBuf)

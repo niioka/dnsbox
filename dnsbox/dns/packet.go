@@ -1,8 +1,15 @@
 package dns
 
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
 type QR int
 
 type Opcode int
+type ResourceType int
 
 const (
 	QRQuery QR = iota
@@ -34,6 +41,12 @@ const (
 	CD_BITMASK     = 0x01
 	RCODE_OFFSET   = 0
 	RCODE_BITMASK  = 0x07
+)
+
+const (
+	_       ResourceType = iota
+	TypeA                = 1
+	TypeTXT              = 16
 )
 
 type Question struct {
@@ -73,4 +86,40 @@ type Packet struct {
 	AdditionalCount    uint16
 	Questions          []*Question
 	Answers            []*ResourceRecord
+}
+
+func (rr *ResourceRecord) String() string {
+	var rType string
+	var rData strings.Builder
+	if rr.Type == TypeA {
+		rType = "A"
+		for i, part := range rr.RData {
+			if i > 0 {
+				rData.WriteByte('.')
+			}
+			rData.WriteString(strconv.Itoa(int(part)))
+		}
+	} else if rr.Type == TypeTXT {
+		rType = "TXT"
+		rData.Write(rr.RData)
+	} else {
+		rType = fmt.Sprintf("%d", rr.Type)
+		rData.WriteByte('[')
+		for i, part := range rr.RData {
+			if i > 0 {
+				rData.WriteString(", ")
+			}
+			rData.WriteString(strconv.Itoa(int(part)))
+		}
+		rData.WriteByte(']')
+	}
+
+	var class string
+	if rr.Class == 1 {
+		class = "IN"
+	} else {
+		class = strconv.Itoa(int(rr.Class))
+	}
+
+	return fmt.Sprintf("%s\t\t%d\t%s\t%s\t%s", rr.Name, rr.TTL, class, rType, rData.String())
 }
