@@ -3,6 +3,7 @@ package main
 import (
 	"dnsbox/dnsbox/dns"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 )
 
 func main() {
@@ -11,5 +12,5 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Printf("recvPacket: %+v", packet)
+	fmt.Printf("recvPacket: %+v", spew.Sdump(packet))
 }

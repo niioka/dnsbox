@@ -43,12 +43,11 @@ type Question struct {
 }
 
 type ResourceRecord struct {
-	Name     string
-	Type     uint16
-	Class    uint16
-	TTL      uint32
-	RDLength uint16
-	RData    []byte
+	Name  string
+	Type  uint16
+	Class uint16
+	TTL   uint32
+	RData []byte
 }
 
 type Packet struct {
@@ -73,4 +72,5 @@ type Packet struct {
 	AuthorityCount     uint16
 	AdditionalCount    uint16
 	Questions          []*Question
+	Answers            []*ResourceRecord
 }

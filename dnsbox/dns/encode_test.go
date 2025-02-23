@@ -30,8 +30,8 @@ func TestEncodePacket_success(t *testing.T) {
 				},
 			},
 			want: []byte{
-				0x12, 0x34, 128, 0, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-				6, 'g', 'o', 'o', 'g', 'l', 'e', 3, 'c', 'o', 'm', 0, 1, 0, 1},
+				0x12, 0x34, 1, 0, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				6, 'g', 'o', 'o', 'g', 'l', 'e', 3, 'c', 'o', 'm', 0, 0, 1, 0, 1},
 		},
 	}
 	for _, tc := range cases {

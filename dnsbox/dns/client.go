@@ -53,7 +53,8 @@ func (c *Client) Query(domain string) (*Packet, error) {
 	}
 
 	fmt.Printf("recvLen: %d recvBuf: %v\n", recvLen, recvBuf[0:recvLen])
-	recvPacket, err := DecodePacket(recvBuf)
+	var pd PacketDecoder
+	recvPacket, err := pd.DecodePacket(recvBuf)
 	if err != nil {
 		return nil, err
 	}
