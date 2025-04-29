@@ -31,8 +31,7 @@ func (c *Client) Resolve(question *Question) ([]*ResourceRecord, error) {
 		},
 	})
 	if err != nil {
-		log.Errorf("Failed to resolve DNS records: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to resove DNS record: %w", err)
 	}
 	fmt.Printf("recvPacket: %+v", spew.Sdump(recvPacket))
 

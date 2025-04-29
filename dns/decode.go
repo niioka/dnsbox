@@ -8,7 +8,6 @@ import (
 
 const PacketBaseLength = 12
 
-var ErrInvalidDomain = errors.New("invalid domain")
 var ErrPacketTooShort = errors.New("packet too short")
 var ErrInvalidNameIndex = errors.New("invalid name index")
 

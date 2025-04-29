@@ -6,6 +6,48 @@ import (
 	"testing"
 )
 
+func TestValidateDomain(t *testing.T) {
+	// ARRANGE
+	cases := []struct {
+		label  string
+		domain string
+		want   error
+	}{
+		{
+			label:  "ok/1",
+			domain: "example.com",
+		},
+		{
+			label:  "err/part-contains-invalid-rune",
+			domain: "__.jp",
+			want:   ErrInvalidDomain,
+		},
+		{
+			label:  "err/tld-is-too-short",
+			domain: "_.a",
+			want:   ErrInvalidDomain,
+		},
+		{
+			label:  "err/tld-contains-hyphen",
+			domain: "x.a-",
+			want:   ErrInvalidDomain,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.label, func(t *testing.T) {
+			// ACT
+			err := ValidateDomain(tc.domain)
+
+			// ASSERT
+			if !errors.Is(err, tc.want) {
+				t.Errorf("ValidateDomain(%q) = %v; want %v", tc.domain, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestDecodeDomain(t *testing.T) {
 	// ARRANGE
 	cases := []struct {

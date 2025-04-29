@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -9,6 +10,8 @@ const (
 	PtrFlag = 0b11000000
 	PtrHead = 0b00111111
 )
+
+var ErrInvalidDomain = errors.New("invalid domain")
 
 // decodeDomain - バイト配列からドメインをデコードする
 func decodeDomain(buf []byte, start int) (string, int, error) {
@@ -68,6 +71,36 @@ func getPointerString(buf []byte, start int, stop int) (s string, isPtr bool, er
 	// 参照先を読み込む
 	s, _, err = decodeDomain(buf, idx)
 	return
+}
+
+func ValidateDomain(domain string) error {
+	if domain == "" || domain == "." {
+		return nil
+	}
+	parts := strings.Split(strings.TrimSuffix(domain, "."), ".")
+	for i, part := range parts {
+		partLength := len(part)
+		if partLength == 0 || partLength > 63 {
+			return fmt.Errorf("%w: invalid part length(domain=%q)", ErrInvalidDomain, domain)
+		}
+		for j, c := range part {
+			if !isAlnum(c) {
+				return fmt.Errorf("%w: invalid character in domain part(domain=%q)", ErrInvalidDomain, domain)
+			}
+			if (j == 0 || i == len(parts)) && c == '-' {
+				return fmt.Errorf("%w: invalid character in domain part(domain=%q)", ErrInvalidDomain, domain)
+			}
+		}
+		// TLD
+		if i == len(parts)-1 && partLength < 2 {
+			return fmt.Errorf("%w: invalid TLD part length(domain=%q)", ErrInvalidDomain, domain)
+		}
+	}
+	return nil
+}
+
+func isAlnum(c rune) bool {
+	return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
 }
 
 func encodeDomain(domain string) ([]byte, error) {
