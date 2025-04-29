@@ -3,6 +3,7 @@ package dns
 import (
 	"fmt"
 	"github.com/davecgh/go-spew/spew"
+	log "github.com/sirupsen/logrus"
 	"math"
 	"math/rand"
 	"net"
@@ -18,21 +19,19 @@ func NewClient(server string) *Client {
 	}
 }
 
-func (c *Client) ResolveA(domain string) ([]*ResourceRecord, error) {
+func (c *Client) Resolve(question *Question) ([]*ResourceRecord, error) {
+	log.Info("Resolving DNS records...")
 	recvPacket, err := c.question(&Packet{
 		Id:                 uint16(rand.Int() % math.MaxUint16),
 		Qr:                 QRQuery,
 		IsRecursionDesired: true,
 		QuestionCount:      1,
 		Questions: []*Question{
-			{
-				Qname:  domain,
-				Qtype:  TypeA,
-				Qclass: 1,
-			},
+			question,
 		},
 	})
 	if err != nil {
+		log.Errorf("Failed to resolve DNS records: %v", err)
 		return nil, err
 	}
 	fmt.Printf("recvPacket: %+v", spew.Sdump(recvPacket))
@@ -66,11 +65,15 @@ func (c *Client) question(sendPacket *Packet) (*Packet, error) {
 	var err error
 	conn, err := net.Dial("udp", fmt.Sprintf("%s:53", c.server))
 	if err != nil {
+		log.Errorf("Failed to dial DNS server (%s): %v", c.server, err)
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	sendBuf, err := EncodePacket(sendPacket)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode package: %w", err)
+	}
 	fmt.Printf("sendPacket: %+v\n", sendPacket)
 	fmt.Printf("sendBuf: %+v\n", sendBuf)
 	_, err = conn.Write(sendBuf)

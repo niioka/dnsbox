@@ -3,6 +3,7 @@ package dns
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 )
 
 const PacketBaseLength = 12
@@ -17,9 +18,10 @@ type PacketDecoder struct {
 	err error
 }
 
+// DecodePacket - DNSパケットをバイト配列から取得する
 func (pd *PacketDecoder) DecodePacket(buf []byte) (*Packet, error) {
 	if len(buf) < PacketBaseLength {
-		return nil, errors.New("invalid packet")
+		return nil, fmt.Errorf("invalid packet: %w", ErrInvalidDomain)
 	}
 	pd.pos = 0
 	pd.buf = buf
@@ -125,45 +127,6 @@ func (pd *PacketDecoder) peekByte() (byte, error) {
 	return pd.buf[pd.pos], nil
 }
 
-func decodeDomain(buf []byte, start int) (string, int, error) {
-	pos := start
-	stop := len(buf)
-	var domain string
-	if pos+2 <= stop {
-		b1 := int(buf[pos])
-		if (b1 & 192) == 192 {
-			b2 := int(buf[pos+1])
-			idx := (b1&63)*0x100 + b2
-			if idx >= len(buf) {
-				return "", -1, ErrInvalidNameIndex
-			}
-			if (buf[idx] & 192) == 192 {
-				return "", -1, ErrInvalidNameIndex
-			}
-			s, _, err := decodeDomain(buf, idx)
-			return s, pos + 2, err
-		}
-	}
-	for {
-		if pos >= stop {
-			return "", -1, ErrInvalidDomain
-		}
-		partLength := int(buf[pos])
-		if partLength == 0 {
-			pos += 1
-			break
-		}
-		pos += 1
-		if pos+partLength > stop {
-			return "", -1, ErrInvalidDomain
-		}
-		part := string(buf[pos : pos+partLength])
-		domain += part + "."
-		pos += partLength
-	}
-	return domain, pos, nil
-}
-
 func (pd *PacketDecoder) decodeQuestions(qdCount uint16) []*Question {
 	if pd.err != nil {
 		return nil
@@ -174,6 +137,7 @@ func (pd *PacketDecoder) decodeQuestions(qdCount uint16) []*Question {
 		if question == nil {
 			return nil
 		}
+
 		questions = append(questions, question)
 	}
 	return questions
@@ -186,7 +150,7 @@ func (pd *PacketDecoder) decodeQuestion() *Question {
 
 	qname, pos, err := decodeDomain(pd.buf, pd.pos)
 	if err != nil {
-		pd.err = err
+		pd.err = fmt.Errorf("failed to decode domain: %w", err)
 		return nil
 	}
 	pd.pos = pos

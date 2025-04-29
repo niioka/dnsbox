@@ -2,7 +2,7 @@ package dns
 
 import (
 	"encoding/binary"
-	"strings"
+	"fmt"
 )
 
 func EncodePacket(packet *Packet) ([]byte, error) {
@@ -32,7 +32,7 @@ func EncodePacket(packet *Packet) ([]byte, error) {
 	for _, q := range packet.Questions {
 		qBuf, err := encodeQuestion(q)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to encode question: %w", err)
 		}
 		buf = append(buf, qBuf...)
 	}
@@ -46,7 +46,7 @@ func encodeQuestion(q *Question) ([]byte, error) {
 
 	buf, err = encodeDomain(q.Qname)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to encode domain: %w", err)
 	}
 	result = append(result, buf...)
 
@@ -54,21 +54,6 @@ func encodeQuestion(q *Question) ([]byte, error) {
 	result = binary.BigEndian.AppendUint16(result, q.Qclass)
 
 	return result, nil
-}
-
-func encodeDomain(domain string) ([]byte, error) {
-	var buf []byte
-	parts := strings.Split(domain, ".")
-	for _, part := range parts {
-		partLength := len(part)
-		if partLength == 0 || partLength > 255 {
-			return nil, ErrInvalidDomain
-		}
-		buf = append(buf, byte(partLength))
-		buf = append(buf, []byte(part)...)
-	}
-	buf = append(buf, 0)
-	return buf, nil
 }
 
 func boolToByte(b bool) byte {
