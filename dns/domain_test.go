@@ -18,17 +18,17 @@ func TestValidateDomain(t *testing.T) {
 			domain: "example.com",
 		},
 		{
-			label:  "err/part-contains-invalid-rune",
+			label:  "Err/part-contains-invalid-rune",
 			domain: "__.jp",
 			want:   ErrInvalidDomain,
 		},
 		{
-			label:  "err/tld-is-too-short",
+			label:  "Err/tld-is-too-short",
 			domain: "_.a",
 			want:   ErrInvalidDomain,
 		},
 		{
-			label:  "err/tld-contains-hyphen",
+			label:  "Err/tld-contains-hyphen",
 			domain: "x.a-",
 			want:   ErrInvalidDomain,
 		},
@@ -64,7 +64,7 @@ func TestDecodeDomain(t *testing.T) {
 			wantNext:   12,
 		},
 		{
-			label:   "err/out-of-bounds",
+			label:   "Err/out-of-bounds",
 			input:   []byte{5, 'x'},
 			wantErr: ErrInvalidDomain,
 		},
@@ -73,21 +73,17 @@ func TestDecodeDomain(t *testing.T) {
 		tc := tc
 		t.Run(tc.label, func(t *testing.T) {
 			// ACT
-			domain, next, err := decodeDomain(tc.input, 0)
+			domain, err := decodeDomain(NewScanner(tc.input))
 
 			// ASSERT
 			if err != nil {
 				if !errors.Is(err, tc.wantErr) {
-					t.Errorf("err: want %v, got %v", tc.wantErr, err)
+					t.Errorf("Err: want %v, got %v", tc.wantErr, err)
 				}
 				return
 			}
 			if domain != tc.wantDomain {
 				t.Errorf("domain: want %q, got %q", tc.wantDomain, domain)
-				return
-			}
-			if next != tc.wantNext {
-				t.Errorf("next: want %d, got %d", tc.wantNext, next)
 				return
 			}
 		})
@@ -127,12 +123,12 @@ func TestEncodeDomain(t *testing.T) {
 			wantDomain: []byte{0},
 		},
 		{
-			label:   "err/..example",
+			label:   "Err/..example",
 			domain:  "..example",
 			wantErr: ErrInvalidDomain,
 		},
 		{
-			label:   "err/very-long-domain",
+			label:   "Err/very-long-domain",
 			domain:  "1234567890123456789012345678901234567890123456789012345678901234.example",
 			wantErr: ErrInvalidDomain,
 		},
@@ -145,7 +141,7 @@ func TestEncodeDomain(t *testing.T) {
 
 			if err != nil {
 				if !errors.Is(err, tc.wantErr) {
-					t.Errorf("err: want %v, got %v", tc.wantErr, err)
+					t.Errorf("Err: want %v, got %v", tc.wantErr, err)
 				}
 				return
 			}

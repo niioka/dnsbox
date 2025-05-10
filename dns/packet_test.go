@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestEncodePacket_success(t *testing.T) {
+func TestPacket_Encode_success(t *testing.T) {
 	cases := []struct {
 		label string
 		input *Packet
@@ -14,13 +14,12 @@ func TestEncodePacket_success(t *testing.T) {
 		{
 			label: "question",
 			input: &Packet{
-				Id:                    4660,
-				Qr:                    QRQuery,
-				IsAuthoritativeAnswer: false,
-				IsTruncated:           false,
-				IsRecursionDesired:    true,
-				Rcode:                 0,
-				QuestionCount:         1,
+				Id:    4660,
+				QR:    QRQuery,
+				AA:    false,
+				TC:    false,
+				RD:    true,
+				RCode: 0,
 				Questions: []*Question{
 					{
 						Qname:  "google.com",
@@ -35,8 +34,9 @@ func TestEncodePacket_success(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
+		tc := tc
 		t.Run(tc.label, func(t *testing.T) {
-			got, err := EncodePacket(tc.input)
+			got, err := tc.input.Encode()
 			if err != nil {
 				t.Errorf("EncodePacket(%v) failed: %v", tc.input, err)
 				return

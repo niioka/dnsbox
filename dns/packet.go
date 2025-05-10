@@ -1,125 +1,197 @@
 package dns
 
 import (
+	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 )
 
 type QR int
-
-type Opcode int
-type ResourceType int
 
 const (
 	QRQuery QR = iota
 	QRResponse
 )
 
+type Class uint16
+
 const (
-	_                 Opcode = iota
-	OpcodeNormalQuery        = 1
-	OpcodeNotify             = 4
-	OpcodeUpdate             = 5
+	ClassIN Class = 1
+)
+
+func (c Class) Bytes() []byte {
+	cls := c
+	if cls == 0 {
+		cls = ClassIN
+	}
+	var buf []byte
+	buf = binary.BigEndian.AppendUint16(buf, uint16(c))
+	return buf
+}
+
+func (c Class) String() string {
+	switch c {
+	case ClassIN:
+		return "IN"
+	default:
+		return fmt.Sprintf("UNKNOWN(%d)", c)
+	}
+}
+
+type Opcode int
+
+const (
+	OpcodeQuery  Opcode = 0
+	OpcodeIQuery Opcode = 1
+	OpcodeNotify Opcode = 4
+	OpcodeUpdate Opcode = 5
 )
 
 const (
-	QR_OFFSET      = 7
-	OPCODE_OFFSET  = 3
-	OPCODE_BITMASK = 0x0f
-	AA_OFFSET      = 2
-	AA_BITMASK     = 0x01
-	TC_OFFSET      = 1
-	TC_BITMASK     = 0x01
-	RD_OFFSET      = 0
-	RD_BITMASK     = 0x01
-	RA_OFFSET      = 7
-	RA_BITMASK     = 0x01
-	AD_OFFSET      = 5
-	AD_BITMASK     = 0x01
-	CD_OFFSET      = 4
-	CD_BITMASK     = 0x01
-	RCODE_OFFSET   = 0
-	RCODE_BITMASK  = 0x07
-)
-
-const (
-	_       ResourceType = iota
-	TypeA                = 1
-	TypeTXT              = 16
+	RCodeNoError        = 0
+	RCodeFormatError    = 1
+	RCodeServerFailure  = 2
+	RCodeNameError      = 3
+	RCodeNotImplemented = 4
+	RCodeRefused        = 5
+	RCodeNotAuth        = 8
 )
 
 type Question struct {
 	Qname  string
-	Qtype  uint16
-	Qclass uint16
+	Qtype  ResourceType
+	Qclass Class
 }
 
-type ResourceRecord struct {
-	Name  string
-	Type  uint16
-	Class uint16
-	TTL   uint32
-	RData []byte
+func (q *Question) Bytes() ([]byte, error) {
+	result, err := encodeDomain(q.Qname)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode domain: %w", err)
+	}
+
+	result = append(result, q.Qtype.Bytes()...)
+	result = append(result, q.Qclass.Bytes()...)
+
+	return result, nil
 }
 
+const (
+	OffsetQR      = 7
+	OffsetOpcode  = 3
+	OffsetAA      = 2
+	OffsetTC      = 1
+	OffsetRD      = 0
+	OffsetRA      = 7
+	OffsetAD      = 5
+	OffsetCD      = 4
+	OffsetRCode   = 0
+	BitmaskOpcode = 0x0f
+	BitmaskAA     = 0x01
+	BitmaskTC     = 0x01
+	BitmaskRD     = 0x01
+	BitmaskRA     = 0x01
+	BitmaskAD     = 0x01
+	BitmaskCD     = 0x01
+	BitmaskRCode  = 0x07
+)
+
+// Packet - See RFC1035 for details.
 type Packet struct {
 	Id     uint16
-	Qr     QR
+	QR     QR
 	Opcode Opcode
-	// AA
-	IsAuthoritativeAnswer bool
-	// TC
-	IsTruncated bool
-	// RD
-	IsRecursionDesired bool
-	// RA
-	IsRecursionAvailable bool
-	// AD
-	IsAuthenticData bool
-	// CD
-	IsCheckingDisabled bool
-	Rcode              int
-	QuestionCount      uint16
-	AnswerCount        uint16
-	AuthorityCount     uint16
-	AdditionalCount    uint16
-	Questions          []*Question
-	Answers            []*ResourceRecord
+	// AA - Authoritative Answer
+	AA bool
+	// TC - Truncated
+	TC bool
+	// RD - Recursion Desired
+	RD bool
+	// RA - Recursion Available
+	RA bool
+	// AD - Authentic Data
+	AD bool
+	// CD - Checking Disabled
+	CD          bool
+	RCode       int
+	Questions   []*Question
+	Answers     []*ResourceRecord
+	Authorities []*ResourceRecord
+	Additions   []*ResourceRecord
 }
 
-func (rr *ResourceRecord) String() string {
-	var rType string
-	var rData strings.Builder
-	if rr.Type == TypeA {
-		rType = "A"
-		for i, part := range rr.RData {
-			if i > 0 {
-				rData.WriteByte('.')
-			}
-			rData.WriteString(strconv.Itoa(int(part)))
-		}
-	} else if rr.Type == TypeTXT {
-		rType = "TXT"
-		rData.Write(rr.RData)
-	} else {
-		rType = fmt.Sprintf("%d", rr.Type)
-		rData.WriteByte('[')
-		for i, part := range rr.RData {
-			if i > 0 {
-				rData.WriteString(", ")
-			}
-			rData.WriteString(strconv.Itoa(int(part)))
-		}
-		rData.WriteByte(']')
+func (p *Packet) QuestionCount() uint16 {
+	return uint16(len(p.Questions))
+}
+
+func (p *Packet) Encode() ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("packet should not be nil")
 	}
 
-	var class string
-	if rr.Class == 1 {
-		class = "IN"
-	} else {
-		class = strconv.Itoa(int(rr.Class))
+	boolToByte := func(b bool) byte {
+		if b {
+			return 1
+		} else {
+			return 0
+		}
 	}
 
-	return fmt.Sprintf("%s\t\t%d\t%s\t%s\t%s", rr.Name, rr.TTL, class, rType, rData.String())
+	encodeBase := func() []byte {
+		var buf []byte
+		buf = binary.BigEndian.AppendUint16(buf, p.Id)
+
+		b1 := func() byte {
+			var b byte
+			b |= byte((p.QR & 0x01) << OffsetQR)
+			b |= byte((p.Opcode & BitmaskOpcode) << OffsetOpcode)
+			b |= boolToByte(p.AA) << OffsetAA
+			b |= boolToByte(p.TC) << OffsetTC
+			b |= boolToByte(p.RD) << OffsetRD
+			return b
+		}()
+		buf = append(buf, b1)
+
+		b2 := func() byte {
+			var b byte
+			b |= boolToByte(p.RA) << OffsetRA
+			b |= boolToByte(p.AD) << OffsetAD
+			b |= boolToByte(p.CD) << OffsetCD
+			b |= byte((p.RCode & BitmaskRCode) << OffsetRCode)
+			return b
+		}()
+		buf = append(buf, b2)
+
+		buf = binary.BigEndian.AppendUint16(buf, uint16(len(p.Questions)))
+		buf = binary.BigEndian.AppendUint16(buf, uint16(len(p.Answers)))
+		// AuthorityCount
+		buf = binary.BigEndian.AppendUint16(buf, uint16(len(p.Authorities)))
+		// AdditionalCount
+		buf = binary.BigEndian.AppendUint16(buf, uint16(len(p.Additions)))
+
+		return buf
+	}
+
+	var buf bytes.Buffer
+	buf.Write(encodeBase())
+
+	for _, q := range p.Questions {
+		qBuf, err := q.Bytes()
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode the question: %w", err)
+		}
+
+		buf.Write(qBuf)
+	}
+
+	for _, rr := range p.Answers {
+		rrBuf, err := rr.Bytes()
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode the answer: %w", err)
+		}
+
+		buf.Write(rrBuf)
+	}
+
+	return buf.Bytes(), nil
 }

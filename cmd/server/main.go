@@ -1,8 +1,10 @@
 package main
 
-import "github.com/niioka/dnsbox/dns"
+import (
+	"github.com/niioka/dnsbox/dns/server"
+)
 
 func main() {
-	server := dns.NewServer(dns.ServerConfig{})
+	server := server.NewServer(server.ServerConfig{})
 	server.Start()
 }

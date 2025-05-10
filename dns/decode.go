@@ -1,226 +1,283 @@
 package dns
 
 import (
-	"encoding/binary"
-	"errors"
 	"fmt"
 )
 
 const PacketBaseLength = 12
 
-var ErrPacketTooShort = errors.New("packet too short")
-var ErrInvalidNameIndex = errors.New("invalid name index")
+type PacketDecodeError struct {
+	Err   error
+	Field string
+}
+
+func (e *PacketDecodeError) Error() string {
+	return fmt.Sprintf("packet decode error (field=%q): %v", e.Field, e.Err)
+}
+
+func (e *PacketDecodeError) Unwrap() error {
+	return e.Err
+}
 
 type PacketDecoder struct {
+	// pos は現在の解析位置
 	pos int
 	buf []byte
 	err error
 }
 
 // DecodePacket - DNSパケットをバイト配列から取得する
-func (pd *PacketDecoder) DecodePacket(buf []byte) (*Packet, error) {
-	if len(buf) < PacketBaseLength {
-		return nil, fmt.Errorf("invalid packet: %w", ErrInvalidDomain)
+func DecodePacket(buf []byte) (*Packet, error) {
+	sc := NewScanner(buf)
+
+	id, err := sc.ReadUint16()
+	if err != nil {
+		return nil, &PacketDecodeError{
+			Err:   err,
+			Field: "ID",
+		}
 	}
-	pd.pos = 0
-	pd.buf = buf
-	pd.err = nil
+	b1, err := sc.ReadByte()
+	if err != nil {
+		return nil, &PacketDecodeError{
+			Err:   err,
+			Field: "FLAGS[0]",
+		}
+	}
+	qr := QR((b1 >> OffsetQR) & 0x01)
+	opcode := Opcode((b1 >> OffsetOpcode) & BitmaskOpcode)
+	aa := ((b1 >> OffsetAA) & BitmaskAA) != 0
+	tc := ((b1 >> OffsetTC) & BitmaskTC) != 0
+	rd := ((b1 >> OffsetRD) & BitmaskRD) != 0
 
-	id := pd.decodeUint16()
+	b2, err := sc.ReadByte()
+	if err != nil {
+		return nil, &PacketDecodeError{
+			Err:   err,
+			Field: "FLAGS[1]",
+		}
+	}
+	isRecursionAvailable := ((b2 >> OffsetRA) & BitmaskRA) != 0
+	isAuthenticData := ((b2 >> OffsetAD) & BitmaskAD) != 0
+	isCheckingDisabled := ((b2 >> OffsetCD) & BitmaskCD) != 0
+	rcode := int((b2 >> OffsetRCode) & BitmaskRCode)
 
-	b1 := pd.decodeByte()
-	qr := QR((b1 >> QR_OFFSET) & 0x01)
-	opcode := Opcode((b1 >> OPCODE_OFFSET) & OPCODE_BITMASK)
-	isAuthoritativeAnswer := ((b1 >> AA_OFFSET) & AA_BITMASK) != 0
-	isTruncated := ((b1 >> TC_OFFSET) & TC_BITMASK) != 0
-	isRecursionDesired := ((b1 >> RD_OFFSET) & RD_BITMASK) != 0
-
-	b2 := pd.decodeByte()
-	isRecursionAvailable := ((b2 >> RA_OFFSET) & RA_BITMASK) != 0
-	isAuthenticData := ((b2 >> AD_OFFSET) & AD_BITMASK) != 0
-	isCheckingDisabled := ((b2 >> CD_OFFSET) & CD_BITMASK) != 0
-	rcode := int((b2 >> RCODE_OFFSET) & RCODE_BITMASK)
-
-	qdCount := pd.decodeUint16()
-	anCount := pd.decodeUint16()
-	nsCount := pd.decodeUint16()
-	arCount := pd.decodeUint16()
-	if pd.err != nil {
-		return nil, pd.err
+	qdCount, err := sc.ReadUint16()
+	if err != nil {
+		return nil, fmt.Errorf("decode packet: qdCount: %w", err)
+	}
+	anCount, err := sc.ReadUint16()
+	if err != nil {
+		return nil, fmt.Errorf("decode packet: anCount: %w", err)
+	}
+	nsCount, err := sc.ReadUint16()
+	if err != nil {
+		return nil, fmt.Errorf("decode packet: nsCount: %w", err)
+	}
+	arCount, err := sc.ReadUint16()
+	if err != nil {
+		return nil, fmt.Errorf("decode packet: arCount: %w", err)
 	}
 
-	questions := pd.decodeQuestions(qdCount)
-	if pd.err != nil {
-		return nil, pd.err
+	questions, err := decodeQuestions(sc, qdCount)
+	if err != nil {
+		return nil, fmt.Errorf("decode packet: questions: %w", err)
 	}
-
-	answers := pd.decodeResourceRecords(anCount)
+	answers, err := decodeResourceRecords(sc, anCount)
+	if err != nil {
+		return nil, fmt.Errorf("decode packet: answers: %w", err)
+	}
+	authorities, err := decodeResourceRecords(sc, nsCount)
+	if err != nil {
+		return nil, &PacketDecodeError{
+			Err:   err,
+			Field: "AUTHORITY RRs",
+		}
+	}
+	additions, err := decodeResourceRecords(sc, arCount)
+	if err != nil {
+		return nil, &PacketDecodeError{
+			Err:   err,
+			Field: "ADDITIONAL RRs",
+		}
+	}
 
 	return &Packet{
-		Id:                    id,
-		Qr:                    qr,
-		Opcode:                opcode,
-		IsAuthoritativeAnswer: isAuthoritativeAnswer,
-		IsTruncated:           isTruncated,
-		IsRecursionDesired:    isRecursionDesired,
-		IsRecursionAvailable:  isRecursionAvailable,
-		IsAuthenticData:       isAuthenticData,
-		IsCheckingDisabled:    isCheckingDisabled,
-		Rcode:                 rcode,
-		QuestionCount:         qdCount,
-		AnswerCount:           anCount,
-		AuthorityCount:        nsCount,
-		AdditionalCount:       arCount,
-		Questions:             questions,
-		Answers:               answers,
+		Id:          id,
+		QR:          qr,
+		Opcode:      opcode,
+		AA:          aa,
+		TC:          tc,
+		RD:          rd,
+		RA:          isRecursionAvailable,
+		AD:          isAuthenticData,
+		CD:          isCheckingDisabled,
+		RCode:       rcode,
+		Questions:   questions,
+		Answers:     answers,
+		Authorities: authorities,
+		Additions:   additions,
 	}, nil
 }
 
-func (pd *PacketDecoder) decodeUint32() uint32 {
-	if pd.err != nil {
-		return 0
-	}
-	if pd.pos+4 > len(pd.buf) {
-		pd.err = ErrPacketTooShort
-		return 0
-	}
-	n := binary.BigEndian.Uint32(pd.buf[pd.pos : pd.pos+4])
-	pd.pos += 4
-	return n
-}
-
-func (pd *PacketDecoder) decodeUint16() uint16 {
-	if pd.err != nil {
-		return 0
-	}
-	if pd.pos+2 > len(pd.buf) {
-		pd.err = ErrPacketTooShort
-		return 0
-	}
-	n := binary.BigEndian.Uint16(pd.buf[pd.pos : pd.pos+2])
-	pd.pos += 2
-	return n
-}
-
-func (pd *PacketDecoder) decodeByte() byte {
-	if pd.err != nil {
-		return 0
-	}
-	if pd.pos >= len(pd.buf) {
-		pd.err = ErrPacketTooShort
-		return 0
-	}
-	b := pd.buf[pd.pos]
-	pd.pos++
-	return b
-}
-
-func (pd *PacketDecoder) peekByte() (byte, error) {
-	if pd.err != nil {
-		return 0, pd.err
-	}
-	if pd.pos >= len(pd.buf) {
-		pd.err = ErrPacketTooShort
-		return 0, pd.err
-	}
-	return pd.buf[pd.pos], nil
-}
-
-func (pd *PacketDecoder) decodeQuestions(qdCount uint16) []*Question {
-	if pd.err != nil {
-		return nil
-	}
+func decodeQuestions(sc *Scanner, qdCount uint16) ([]*Question, error) {
 	var questions []*Question
 	for i := 0; i < int(qdCount); i++ {
-		question := pd.decodeQuestion()
-		if question == nil {
-			return nil
+		question, err := decodeQuestion(sc)
+		if err != nil {
+			return nil, err
 		}
 
 		questions = append(questions, question)
 	}
-	return questions
+	return questions, nil
 }
 
-func (pd *PacketDecoder) decodeQuestion() *Question {
-	if pd.err != nil {
-		return nil
-	}
-
-	qname, pos, err := decodeDomain(pd.buf, pd.pos)
+func decodeQuestion(sc *Scanner) (*Question, error) {
+	qname, err := decodeDomain(sc)
 	if err != nil {
-		pd.err = fmt.Errorf("failed to decode domain: %w", err)
-		return nil
+		return nil, err
 	}
-	pd.pos = pos
 
-	qtype := pd.decodeUint16()
-	qclass := pd.decodeUint16()
+	qtype, err := sc.ReadUint16()
+	if err != nil {
+		return nil, err
+	}
+	qclass, err := sc.ReadUint16()
+	if err != nil {
+		return nil, err
+	}
 
 	return &Question{
 		Qname:  qname,
-		Qtype:  qtype,
-		Qclass: qclass,
-	}
+		Qtype:  ResourceType(qtype),
+		Qclass: Class(qclass),
+	}, nil
 }
 
-func (pd *PacketDecoder) decodeResourceRecords(recordCount uint16) []*ResourceRecord {
-	if pd.err != nil {
-		return nil
-	}
+func decodeResourceRecords(sc *Scanner, recordCount uint16) ([]*ResourceRecord, error) {
 	var records []*ResourceRecord
 	for i := 0; i < int(recordCount); i++ {
-		record := pd.decodeResourceRecord()
-		if record == nil {
-			return nil
+		record, err := decodeResourceRecord(sc)
+		if err != nil {
+			return nil, err
 		}
 		records = append(records, record)
 	}
-	return records
+	return records, nil
 }
 
-func (pd *PacketDecoder) decodeResourceRecord() *ResourceRecord {
-	if pd.err != nil {
-		return nil
-	}
-	name, next, err := decodeDomain(pd.buf, pd.pos)
+func decodeResourceRecord(sc *Scanner) (*ResourceRecord, error) {
+	name, err := decodeDomain(sc)
 	if err != nil {
-		pd.err = err
-		return nil
+		return nil, err
 	}
-	pd.pos = next
 
-	rtype := pd.decodeUint16()
-	rclass := pd.decodeUint16()
-	ttl := pd.decodeUint32()
-	rdata := pd.decodeSizedBytes()
-	if pd.err != nil {
-		return nil
+	rrType, err := sc.ReadUint16()
+	if err != nil {
+		return nil, fmt.Errorf("TYPE: %w", err)
+	}
+	class, err := sc.ReadUint16()
+	if err != nil {
+		return nil, err
+	}
+
+	ttl, err := sc.ReadUint32()
+	if err != nil {
+		return nil, err
+	}
+
+	rdLength, err := sc.ReadUint16()
+	if err != nil {
+		return nil, err
+	}
+
+	rdata, err := decodeRData(sc, ResourceType(rrType), rdLength)
+	if err != nil {
+		return nil, fmt.Errorf("RDATA: %w", err)
 	}
 
 	return &ResourceRecord{
 		Name:  name,
-		Type:  rtype,
-		Class: rclass,
+		Class: Class(class),
 		TTL:   ttl,
 		RData: rdata,
-	}
+	}, nil
 }
 
-func (pd *PacketDecoder) decodeSizedBytes() []byte {
-	if pd.err != nil {
-		return nil
+func decodeRData(sc *Scanner, rrType ResourceType, rdLength uint16) (RData, error) {
+	decodeString := func() ([]byte, error) {
+		size, err := sc.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		if size == 0 {
+			return nil, nil
+		}
+		return sc.ReadBytes(int(size))
 	}
-	length := int(pd.decodeUint16())
-	if pd.err != nil {
-		return nil
+
+	if rrType == ResourceTypeA {
+		addr, err := sc.ReadBytes(4)
+		if err != nil {
+			return nil, err
+		}
+		return &AData{
+			Address: addr,
+		}, nil
+	} else if rrType == ResourceTypeTXT {
+		nRead := uint16(0)
+		buf := make([]byte, 0, rdLength)
+		for nRead < rdLength {
+			bs, err := decodeString()
+			if err != nil {
+				return nil, err
+			}
+			nRead += uint16(len(bs)) + 1
+			buf = append(buf, bs...)
+		}
+		return &TXTData{
+			Text: string(buf),
+		}, nil
+	} else if rrType == ResourceTypeSOA {
+		mname, err := decodeDomain(sc)
+		if err != nil {
+			return nil, err
+		}
+		rname, err := decodeDomain(sc)
+		if err != nil {
+			return nil, err
+		}
+		serial, err := sc.ReadUint32()
+		if err != nil {
+			return nil, err
+		}
+		refresh, err := sc.ReadUint32()
+		if err != nil {
+			return nil, err
+		}
+		retry, err := sc.ReadUint32()
+		if err != nil {
+			return nil, err
+		}
+		expire, err := sc.ReadUint32()
+		if err != nil {
+			return nil, err
+		}
+		minimum, err := sc.ReadUint32()
+		if err != nil {
+			return nil, err
+		}
+		return &SOAData{
+			MName:   mname,
+			RName:   rname,
+			Serial:  serial,
+			Refresh: refresh,
+			Retry:   retry,
+			Expire:  expire,
+			Minttl:  minimum,
+		}, nil
+	} else {
+		return nil, fmt.Errorf("invalid resource type (type=%d)", rrType)
 	}
-	if length == 0 {
-		return []byte{}
-	}
-	if pd.pos+length > len(pd.buf) {
-		pd.err = ErrPacketTooShort
-		return nil
-	}
-	return pd.buf[pd.pos : pd.pos+length]
 }
